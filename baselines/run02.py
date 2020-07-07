@@ -1,3 +1,5 @@
+# 1e6 new
+import pickle
 import sys
 import re
 import multiprocessing
@@ -7,7 +9,7 @@ from collections import defaultdict
 import tensorflow as tf
 import numpy as np
 import os
-
+from datetime import datetime
 from baselines.common.vec_env import VecFrameStack, VecNormalize, VecEnv
 from baselines.common.vec_env.vec_video_recorder import VecVideoRecorder
 from baselines.common.cmd_util import common_arg_parser, parse_unknown_args, make_vec_env, make_env
@@ -53,7 +55,7 @@ _game_envs['retro'] = {
 }
 
 
-def train(args, extra_args):
+def train(args, extra_args, game_name, method_name):
     env_type, env_id = get_env_type(args)
     print('env_type: {}'.format(env_type))
 
@@ -64,7 +66,7 @@ def train(args, extra_args):
     alg_kwargs = get_learn_function_defaults(args.alg, env_type)
     alg_kwargs.update(extra_args)
 
-    env = build_env(args)
+    env = build_env(args, game_name, method_name)
     if args.save_video_interval != 0:
         env = VecVideoRecorder(env, osp.join(logger.get_dir(), "videos"),
                                record_video_trigger=lambda x: x % args.save_video_interval == 0,
@@ -88,9 +90,10 @@ def train(args, extra_args):
     return model, env
 
 
-def build_env(args):
+def build_env(args, game_name, method_name):
     ncpu = multiprocessing.cpu_count()
-    if sys.platform == 'darwin': ncpu //= 2
+    if sys.platform == 'darwin':
+        ncpu //= 2
     nenv = args.num_env or ncpu
     alg = args.alg
     seed = args.seed
@@ -99,7 +102,13 @@ def build_env(args):
 
     if env_type in {'atari', 'retro'}:
         if alg == 'deepq':
-            env = make_env(env_id, env_type, seed=seed, wrapper_kwargs={'frame_stack': True})
+            logger_dir_path = 'test_logs/{}/{}'.format(game_name, method_name)
+            logger_dir_exist = os.path.exists(logger_dir_path)
+            if not logger_dir_exist:
+                os.makedirs(logger_dir_path)
+            env = make_env(env_id, env_type, seed=seed,
+                           logger_dir=logger_dir_path,
+                           wrapper_kwargs={'frame_stack': True})
         elif alg == 'trpo_mpi':
             env = make_env(env_id, env_type, seed=seed)
         else:
@@ -207,31 +216,50 @@ def configure_logger(log_path, **kwargs):
 
 
 def main(args):
-    index = 0
-    game_name_list = ['Breakout', 'KungFuMaster', 'Assault', 'SpaceInvaders', 'AirRaid']
+    # default
+    game_name = 'Pong'
+    method = 'baseline'
+    episode_len = 10
+    # for short cmd
+    game_name_list = ['SpaceInvaders',
+                      'Krull',
+                      'BeamRider',
+                      'Hero',
+                      'StarGunner',
+                      'MsPacman',
+                      'Assault',
+                      'Breakout',
+                      'AirRaid',
+                      'KungFuMaster',
+                      'Alien',
+                      'Amidar',
+                      'Asterix',
+                      'Bowling',
+                      'Carnival',
+                      'Enduro',
+                      'Freeway',
+                      'Frostbite',
+                      'JourneyEscape',
+                      'Phoenix',
+                      'Qbert',
+                      'Riverraid',
+                      'VideoPinball',
+                      'Zaxxon']
+    episode_len_list = [
+        3, 3, 3, 4, 5, 3, 4, 5, 1, 4, 3, 4, 3, 1, 1, 1, 1, 4, 1, 6, 4, 4, 3, 5
+    ]
     model_timesteps = '1e6'
     if 'sos' in args:
-        game_name = game_name_list[args[-1]]
-        index = args[-2]
-        # methods = os.listdir('models/{}_{}'.format(game_name, model_timesteps))  # len=53
-        methods = ['baseline',
-                   'prio',
-                   'dpsr500_2048cand_MAX_prio_set_False',
-                   'dpsr500_1024cand_MAX_prio_set_False',
-                   'dpsr500_768cand_MAX_prio_set_False',
-                   'dpsr500_512cand_MAX_prio_set_False',
-                   'dpsr500_384cand_MAX_prio_set_False',
-                   'dpsr500_256cand_MAX_prio_set_False',
-                   'dpsr500_128cand_MAX_prio_set_False',
-                   'dpsr500_64cand_MAX_prio_set_False',
-                   'dpsr500_32cand_MAX_prio_set_False',
-                   'dpsr500_16cand_MAX_prio_set_False',
-                   'dpsr500_8cand_MAX_prio_set_False']
+        model_path = 'models0227_1e6_0.1_128'
+        game_name = game_name_list[int(args[-2])]
+        episode_len = episode_len_list[int(args[-2])]
+        methods = os.listdir('{}/{}_{}'.format(model_path, game_name, model_timesteps))
+        method = methods[int(args[-1])]
         args = ['D:\\Py_workspace\\openai_baselines\\baselines\\run.py',
                 '--alg=deepq',
                 '--env={}NoFrameskip-v4'.format(game_name),
                 '--num_timesteps=0',
-                '--load_path=models/{}_{}/'.format(game_name, model_timesteps) + methods[int(index)],
+                '--load_path={}/{}_{}/'.format(model_path, game_name, model_timesteps) + method,
                 '--play']
     # configure logger, disable logging in child MPI processes (with rank > 0)
     arg_parser = common_arg_parser()
@@ -244,8 +272,7 @@ def main(args):
     else:
         rank = MPI.COMM_WORLD.Get_rank()
         configure_logger(args.log_path, format_strs=[])
-
-    model, env = train(args, extra_args)
+    model, env = train(args, extra_args, game_name, method)
 
     if args.save_path is not None and rank == 0:
         save_path = osp.expanduser(args.save_path)
@@ -260,8 +287,8 @@ def main(args):
                 break
             final_path_pos -= 1
         method_name = load_path_arg[final_path_pos + 1:]
-        res_file = open('res_{}_{}.txt'.format(game_name, model_timesteps), 'a')
-        res_file.write(method_name + '\n')
+        # res_file = open('res_{}_{}.txt'.format(game_name, model_timesteps), 'a')
+        # res_file.write(method_name + '\n')
 
         logger.log("Running trained model")
         obs = env.reset()
@@ -274,7 +301,8 @@ def main(args):
         total_lives = 1
         round_rew = []
         round_count = 0
-        total_round_num = 300
+        # total_round_num = 100
+        total_round_num = episode_len * 11
         while True:
             if state is not None:
                 actions, _, state, _ = model.step(obs, S=state, M=dones)
@@ -283,7 +311,7 @@ def main(args):
             obs, rew, done, _ = env.step(actions)
             round_act_num += 1
             episode_rew += rew
-            env.render()
+            # env.render()
             # done_any = done.any() if isinstance(done, np.ndarray) else done
             # if done_any:
             #     for i in np.nonzero(done)[0]:
@@ -294,14 +322,14 @@ def main(args):
                 round_rew.append(episode_rew[0])
                 episode_rew[0] = 0
                 if len(round_rew) == total_lives:
-                    round_res_inf = '{}, {}'.format(sum(round_rew), round_act_num)
-                    print(round_res_inf)
-                    res_file.write(round_res_inf + '\n')
+                    # round_res_inf = '{}, {}'.format(sum(round_rew), round_act_num)
+                    # print(round_count, round_res_inf)
+                    # res_file.write(round_res_inf + '\n')
                     round_rew = []
                     round_act_num = 0
                     round_count += 1
                     if round_count == total_round_num:
-                        res_file.close()
+                        # res_file.close()
                         break
                 env.reset()
     env.close()

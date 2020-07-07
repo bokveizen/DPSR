@@ -123,7 +123,6 @@ def learn(env,
           dpsr_replay_alpha1=0.6,
           dpsr_replay_alpha2=0.6,
           dpsr_replay_candidates_size=5,
-          dpsr_common_replacement_candidates_number=128,
           dpsr_replay_beta_iters=None,
           dpsr_replay_beta0=0.4,
           dpsr_replay_eps=1e-6,
@@ -132,7 +131,6 @@ def learn(env,
           param_noise=False,
           callback=None,
           load_path=None,
-          atari_env=True,
           **network_kwargs):
     """Train a deepq model.
 
@@ -195,9 +193,7 @@ def learn(env,
     dpsr_replay_alpha2: float
         alpha2 parameter for DPSR replay buffer
     dpsr_replay_candidates_size: int
-        candidates size parameter for DPSR replay buffer state recycle
-    dpsr_common_replacement_candidates_number: int
-        candidates size parameter for DPSR replay buffer common replacement
+        candidates size parameter for DPSR replay buffer
     dpsr_replay_beta_iters: int
         number of iterations over which beta will be annealed from initial value
         to 1.0. If set to None equals to total_timesteps.
@@ -216,8 +212,6 @@ def learn(env,
         If callback returns true training stops.
     load_path: str
         path to load the model from. (default: None)
-    atari_env: bool
-        if True the env is an atari env
     **network_kwargs
         additional keyword arguments to pass to the network builder.
 
@@ -228,7 +222,6 @@ def learn(env,
         See header of baselines/deepq/categorical.py for details on the act function.
     """
     # Create all the functions necessary to train the model
-
     sess = get_session()
     set_global_seeds(seed)
 
@@ -273,8 +266,7 @@ def learn(env,
                                                                    alpha1=dpsr_replay_alpha1,
                                                                    alpha2=dpsr_replay_alpha2,
                                                                    candidates_size=dpsr_replay_candidates_size,
-                                                                   # Not Used: env_id=env.env.spec.id
-                                                                   env_id=None)
+                                                                   env_id=env.env.spec.id)
         if dpsr_replay_beta_iters is None:
             dpsr_replay_beta_iters = total_timesteps
         beta_schedule = LinearSchedule(dpsr_replay_beta_iters,
@@ -336,27 +328,20 @@ def learn(env,
             reset = False
             env_clone_state = None
             if dpsr_replay:
-                env_clone_state = env.clone_state() if atari_env \
-                    else copy.deepcopy(env.envs[0].env)
+                env_clone_state = env.clone_state()
             new_obs, rew, done, _ = env.step(env_action)
             # Store transition in the replay buffer.
             if dpsr_replay:
                 if replay_buffer.not_full():
                     replay_buffer.add(obs, action, rew, new_obs, float(done), env_clone_state, t)
                 elif state_recycle_freq and t % state_recycle_freq == 0:
-                    current_env_copy = None
-                    if not atari_env:
-                        current_env_copy = copy.deepcopy(env.envs[0].env)
                     candidates_idxes, candidates = replay_buffer.replacement_candidates()
                     candidates_recycled = []
                     for candidate in candidates:
+                        new_env = copy.deepcopy(env)
+                        new_env.reset()
                         cand_obs, cand_old_act, *_, cand_state, cand_t = candidate
-                        if atari_env:
-                            new_env = copy.deepcopy(env)
-                            new_env.reset()
-                            new_env.restore_state(cand_state)
-                        else:
-                            env.envs[0].env = cand_state
+                        new_env.restore_state(cand_state)
                         new_action_cand = act(np.array(cand_obs)[None], update_eps=0.0, **kwargs)[0]
                         # make sure that a new experience is made
                         if new_action_cand != cand_old_act:
@@ -367,10 +352,7 @@ def learn(env,
                                 if new_action_cand != cand_old_act:
                                     new_action = new_action_cand
                                     break
-                        if atari_env:
-                            new_new_obs, new_rew, new_done, _ = new_env.step(new_action)
-                        else:
-                            new_new_obs, new_rew, new_done, _ = env.step(new_action)
+                        new_new_obs, new_rew, new_done, _ = new_env.step(new_action)
                         new_data = (cand_obs, new_action, new_rew, new_new_obs, new_done, cand_state, t)
                         candidates_recycled.append(new_data)
                     # get the new TDEs after recycling
@@ -386,12 +368,9 @@ def learn(env,
                     replay_buffer.state_recycle(candidates_idxes, candidates_recycled, cand_td_errors,
                                                 dpsr_state_recycle_max_priority_set)
                     replay_buffer.add(obs, action, rew, new_obs, float(done), env_clone_state, t)
-                    if not atari_env:
-                        env.envs[0].env = current_env_copy
                 else:
                     # common_replacement_candidates_number = 128
-                    candidates_idxes, candidates = replay_buffer.replacement_candidates(
-                        dpsr_common_replacement_candidates_number)
+                    candidates_idxes, candidates = replay_buffer.replacement_candidates(128)
                     cand_timestamps = [candidate[-1] for candidate in candidates]
                     replace_idx = candidates_idxes[np.argmin(cand_timestamps)]
                     replay_buffer.add(obs, action, rew, new_obs, float(done), env_clone_state, t, replace_idx)

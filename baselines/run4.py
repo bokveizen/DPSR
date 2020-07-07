@@ -208,25 +208,12 @@ def configure_logger(log_path, **kwargs):
 
 def main(args):
     index = 0
-    game_name_list = ['Breakout', 'KungFuMaster', 'Assault', 'SpaceInvaders', 'AirRaid']
+    # game_name_list = ['Breakout', 'KungFuMaster', 'Assault', 'SpaceInvaders', 'AirRaid']
     model_timesteps = '1e6'
+    game_name = 'AirRaid'
     if 'sos' in args:
-        game_name = game_name_list[args[-1]]
-        index = args[-2]
-        # methods = os.listdir('models/{}_{}'.format(game_name, model_timesteps))  # len=53
-        methods = ['baseline',
-                   'prio',
-                   'dpsr500_2048cand_MAX_prio_set_False',
-                   'dpsr500_1024cand_MAX_prio_set_False',
-                   'dpsr500_768cand_MAX_prio_set_False',
-                   'dpsr500_512cand_MAX_prio_set_False',
-                   'dpsr500_384cand_MAX_prio_set_False',
-                   'dpsr500_256cand_MAX_prio_set_False',
-                   'dpsr500_128cand_MAX_prio_set_False',
-                   'dpsr500_64cand_MAX_prio_set_False',
-                   'dpsr500_32cand_MAX_prio_set_False',
-                   'dpsr500_16cand_MAX_prio_set_False',
-                   'dpsr500_8cand_MAX_prio_set_False']
+        index = args[-1]
+        methods = os.listdir('models/{}_{}'.format(game_name, model_timesteps))  # len=53
         args = ['D:\\Py_workspace\\openai_baselines\\baselines\\run.py',
                 '--alg=deepq',
                 '--env={}NoFrameskip-v4'.format(game_name),
@@ -283,7 +270,7 @@ def main(args):
             obs, rew, done, _ = env.step(actions)
             round_act_num += 1
             episode_rew += rew
-            env.render()
+            # env.render()
             # done_any = done.any() if isinstance(done, np.ndarray) else done
             # if done_any:
             #     for i in np.nonzero(done)[0]:
